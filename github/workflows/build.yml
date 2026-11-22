@@ -1,0 +1,287 @@
+name: Build Vidget APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Tulis proyek Android
+        run: |
+          mkdir -p app/src/main/java/app/vidget/dl
+
+          cat > settings.gradle <<'VIDGET_EOF'
+          pluginManagement {
+              repositories { google(); mavenCentral(); gradlePluginPortal() }
+          }
+          dependencyResolutionManagement {
+              repositories { google(); mavenCentral() }
+          }
+          rootProject.name = "Vidget"
+          include ':app'
+          VIDGET_EOF
+
+          cat > build.gradle <<'VIDGET_EOF'
+          plugins { id 'com.android.application' version '8.5.2' apply false }
+          VIDGET_EOF
+
+          cat > gradle.properties <<'VIDGET_EOF'
+          org.gradle.jvmargs=-Xmx2g
+          android.useAndroidX=false
+          VIDGET_EOF
+
+          cat > app/build.gradle <<'VIDGET_EOF'
+          plugins { id 'com.android.application' }
+          android {
+              namespace 'app.vidget.dl'
+              compileSdk 34
+              defaultConfig {
+                  applicationId 'app.vidget.dl'
+                  minSdk 24
+                  targetSdk 34
+                  versionCode 1
+                  versionName '1.0'
+              }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          }
+          VIDGET_EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'VIDGET_EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+              <application
+                  android:label="Vidget Downloader"
+                  android:usesCleartextTraffic="true"
+                  android:theme="@android:style/Theme.Material.Light.NoActionBar">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:launchMode="singleTop"
+                      android:configChanges="orientation|screenSize|keyboardHidden">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                      <intent-filter>
+                          <action android:name="android.intent.action.SEND" />
+                          <category android:name="android.intent.category.DEFAULT" />
+                          <data android:mimeType="text/plain" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          VIDGET_EOF
+
+          cat > app/src/main/java/app/vidget/dl/MainActivity.java <<'VIDGET_EOF'
+          package app.vidget.dl;
+
+          import android.Manifest;
+          import android.app.Activity;
+          import android.app.DownloadManager;
+          import android.content.ClipData;
+          import android.content.ClipboardManager;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.graphics.Bitmap;
+          import android.net.Uri;
+          import android.os.Build;
+          import android.os.Bundle;
+          import android.os.Environment;
+          import android.view.View;
+          import android.view.inputmethod.EditorInfo;
+          import android.webkit.CookieManager;
+          import android.webkit.URLUtil;
+          import android.webkit.WebChromeClient;
+          import android.webkit.WebResourceRequest;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+          import android.widget.Button;
+          import android.widget.EditText;
+          import android.widget.LinearLayout;
+          import android.widget.ProgressBar;
+          import android.widget.Toast;
+          import java.util.regex.Matcher;
+          import java.util.regex.Pattern;
+
+          public class MainActivity extends Activity {
+              private WebView web;
+              private EditText bar;
+              private ProgressBar prog;
+
+              @Override
+              protected void onCreate(Bundle b) {
+                  super.onCreate(b);
+                  if (Build.VERSION.SDK_INT <= 28) {
+                      requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, 1);
+                  }
+
+                  LinearLayout root = new LinearLayout(this);
+                  root.setOrientation(LinearLayout.VERTICAL);
+                  LinearLayout top = new LinearLayout(this);
+                  top.setOrientation(LinearLayout.HORIZONTAL);
+                  top.setPadding(16, 16, 16, 8);
+
+                  bar = new EditText(this);
+                  bar.setHint("Tempel link di sini");
+                  bar.setSingleLine(true);
+                  bar.setImeOptions(EditorInfo.IME_ACTION_GO);
+                  Button paste = new Button(this);
+                  paste.setText("Tempel");
+                  Button go = new Button(this);
+                  go.setText("Buka");
+                  top.addView(bar, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+                  top.addView(paste);
+                  top.addView(go);
+
+                  prog = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+                  prog.setMax(100);
+                  web = new WebView(this);
+
+                  root.addView(top);
+                  root.addView(prog, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 12));
+                  root.addView(web, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.MATCH_PARENT));
+                  setContentView(root);
+
+                  WebSettings s = web.getSettings();
+                  s.setJavaScriptEnabled(true);
+                  s.setDomStorageEnabled(true);
+                  s.setUserAgentString(s.getUserAgentString().replace("; wv", ""));
+                  CookieManager cm = CookieManager.getInstance();
+                  cm.setAcceptCookie(true);
+                  cm.setAcceptThirdPartyCookies(web, true);
+
+                  web.setWebViewClient(new WebViewClient() {
+                      @Override
+                      public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
+                          String sc = req.getUrl().getScheme();
+                          return !("http".equals(sc) || "https".equals(sc));
+                      }
+
+                      @Override
+                      public void onPageStarted(WebView view, String url, Bitmap icon) {
+                          bar.setText(url);
+                      }
+                  });
+
+                  web.setWebChromeClient(new WebChromeClient() {
+                      @Override
+                      public void onProgressChanged(WebView view, int p) {
+                          prog.setProgress(p);
+                          prog.setVisibility(p >= 100 ? View.GONE : View.VISIBLE);
+                      }
+                  });
+
+                  web.setDownloadListener((url, ua, cd, mime, len) -> {
+                      try {
+                          if (url.startsWith("blob:") || url.startsWith("data:")) {
+                              Toast.makeText(this, "Jenis unduhan ini belum didukung", Toast.LENGTH_LONG).show();
+                              return;
+                          }
+                          String name = URLUtil.guessFileName(url, cd, mime);
+                          DownloadManager.Request r = new DownloadManager.Request(Uri.parse(url));
+                          String ck = CookieManager.getInstance().getCookie(url);
+                          if (ck != null) r.addRequestHeader("Cookie", ck);
+                          if (ua != null) r.addRequestHeader("User-Agent", ua);
+                          if (web.getUrl() != null) r.addRequestHeader("Referer", web.getUrl());
+                          if (mime != null) r.setMimeType(mime);
+                          r.setTitle(name);
+                          r.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+                          r.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name);
+                          ((DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE)).enqueue(r);
+                          Toast.makeText(this, "Mengunduh: " + name, Toast.LENGTH_LONG).show();
+                      } catch (Exception e) {
+                          Toast.makeText(this, "Gagal: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                      }
+                  });
+
+                  go.setOnClickListener(v -> load(bar.getText().toString()));
+                  bar.setOnEditorActionListener((v, a, e) -> {
+                      load(bar.getText().toString());
+                      return true;
+                  });
+                  paste.setOnClickListener(v -> {
+                      ClipboardManager cb = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                      ClipData d = cb.getPrimaryClip();
+                      if (d != null && d.getItemCount() > 0 && d.getItemAt(0).getText() != null) {
+                          bar.setText(d.getItemAt(0).getText());
+                          load(bar.getText().toString());
+                      }
+                  });
+
+                  handle(getIntent());
+              }
+
+              private void load(String t) {
+                  t = t.trim();
+                  if (t.isEmpty()) return;
+                  if (!t.startsWith("http://") && !t.startsWith("https://")) t = "https://" + t;
+                  web.loadUrl(t);
+              }
+
+              private void handle(Intent i) {
+                  if (i != null && Intent.ACTION_SEND.equals(i.getAction())) {
+                      String t = i.getStringExtra(Intent.EXTRA_TEXT);
+                      if (t != null) {
+                          Matcher m = Pattern.compile("https?://\\S+").matcher(t);
+                          if (m.find()) {
+                              bar.setText(m.group());
+                              load(m.group());
+                          }
+                      }
+                  }
+              }
+
+              @Override
+              protected void onNewIntent(Intent i) {
+                  super.onNewIntent(i);
+                  handle(i);
+              }
+
+              @Override
+              public void onBackPressed() {
+                  if (web.canGoBack()) web.goBack();
+                  else super.onBackPressed();
+              }
+          }
+          VIDGET_EOF
+
+      - name: Build APK
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: Simpan APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Vidget-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Buat Release (APK bisa diunduh langsung)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk Vidget.apk
+          gh release create "v${{ github.run_number }}" Vidget.apk \
+            --repo "${{ github.repository }}" \
+            --target "${{ github.sha }}" \
+            --title "Vidget v${{ github.run_number }}" \
+            --notes "APK siap dipasang."
