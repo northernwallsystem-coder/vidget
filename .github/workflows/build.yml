@@ -103,6 +103,7 @@ jobs:
           import android.content.ClipboardManager;
           import android.content.Context;
           import android.content.Intent;
+          import android.content.pm.ActivityInfo;
           import android.content.res.ColorStateList;
           import android.database.Cursor;
           import android.graphics.Bitmap;
@@ -151,7 +152,7 @@ jobs:
               static final int ACC = 0xFF4F46E5, BG = 0xFFF6F7FB, TXT = 0xFF14161F, MUT = 0xFF6B7080, LINE = 0xFFE3E5EE;
               static final int MP = ViewGroup.LayoutParams.MATCH_PARENT, WC = ViewGroup.LayoutParams.WRAP_CONTENT;
 
-              static final String HOME = "<html><head><meta name='viewport' content='width=device-width,initial-scale=1'><style>body{margin:0;font-family:sans-serif;background:#f6f7fb;color:#14161f;display:flex;min-height:100vh;align-items:center;justify-content:center;padding:24px;box-sizing:border-box}.c{text-align:center;max-width:420px}h1{font-size:36px;margin:0 0 8px;background:linear-gradient(90deg,#4f46e5,#9333ea);-webkit-background-clip:text;color:transparent}p{color:#6b7080;line-height:1.7;margin:0}.s{background:#fff;border-radius:18px;padding:18px;margin-top:22px;text-align:left;box-shadow:0 2px 14px rgba(0,0,0,.07)}.s b{color:#4f46e5}</style></head><body><div class='c'><h1>Vidget</h1><p>Browser pengunduh dengan pemblokir iklan.</p><div class='s'><p><b>1.</b> Tempel link di kolom atas, lalu tekan Buka.<br><b>2.</b> Tekan tombol unduh di halaman, atau pakai Cari unduhan.<br><b>3.</b> Pantau file di tab Unduhan.</p></div></div></body></html>";
+              static final String HOME = "<html><head><meta name='viewport' content='width=device-width,initial-scale=1'><style>body{margin:0;font-family:sans-serif;background:#f6f7fb;color:#14161f;display:flex;min-height:100vh;align-items:center;justify-content:center;padding:24px;box-sizing:border-box}.c{text-align:center;max-width:420px}h1{font-size:36px;margin:0 0 8px;background:linear-gradient(90deg,#4f46e5,#9333ea);-webkit-background-clip:text;color:transparent}p{color:#6b7080;line-height:1.7;margin:0}.s{background:#fff;border-radius:18px;padding:18px;margin-top:22px;text-align:left;box-shadow:0 2px 14px rgba(0,0,0,.07)}.s b{color:#4f46e5}</style></head><body><div class='c'><h1>Vidget</h1><p>Browser pengunduh dengan pemblokir iklan.</p><div class='s'><p><b>1.</b> Tempel link di kolom atas, lalu tekan Buka.<br><b>2.</b> Tekan tombol unduh di halaman, atau pakai Cari unduhan.<br><b>3.</b> Video: putar dulu, lalu tekan Simpan video (masuk Galeri). File lain ada di tab Unduhan.</p></div></div></body></html>";
 
               static final String[] ADS = {
                   "doubleclick.net", "googlesyndication.com", "googleadservices.com", "adservice.google.com",
@@ -174,18 +175,29 @@ jobs:
               static final Pattern FILEEXT = Pattern.compile(
                       "\\.(mp4|mkv|webm|mov|avi|mp3|m4a|zip|rar|7z|pdf|apk|iso|exe)([?#]|$)", Pattern.CASE_INSENSITIVE);
 
+              static final Pattern VID = Pattern.compile(
+                      "(\\.(mp4|m3u8|mpd|webm|m4s|mkv|ts|mp3|m4a|aac)([?#/]|$))|player|embed|stream|video|/hls|/dash|vod", Pattern.CASE_INSENSITIVE);
+
+              static final Pattern MEDIA = Pattern.compile(
+                      "\\.(mp4|webm|mkv|mov|m4v)([?#]|$)", Pattern.CASE_INSENSITIVE);
+
+              static final String VSCAN = "(function(){var o=[];document.querySelectorAll('video,source').forEach(function(e){"
+                      + "var u=e.currentSrc||e.src||'';if(u&&u.indexOf('blob:')!==0&&u.indexOf('data:')!==0&&o.indexOf(u)<0)o.push(u);});"
+                      + "return JSON.stringify(o);})()";
+
               static final String CLEAN = "(function(){if(window.__vc)return;window.__vc=1;"
                       + "var ok=/captcha|turnstile|recaptcha|hcaptcha|download|unduh|countdown/i;"
+                      + "var vid=/player|embed|stream|video|m3u8|mp4|[/]e[/]|[/]v[/]/i;"
                       + "function hs(u){try{return new URL(u,location.href).hostname}catch(x){return ''}}"
                       + "function bs(h){return h.split('.').slice(-2).join('.')}"
                       + "function clean(){try{"
                       + "document.querySelectorAll('iframe').forEach(function(f){var h=hs(f.src);"
-                      + "if(!h||bs(h)===bs(location.hostname)||ok.test(f.src)||/google|gstatic|cloudflare|hcaptcha|recaptcha/.test(h))return;f.remove();});"
+                      + "if(!h||bs(h)===bs(location.hostname)||ok.test(f.src)||vid.test(f.src)||/google|gstatic|cloudflare|hcaptcha|recaptcha/.test(h))return;f.remove();});"
                       + "document.querySelectorAll('div,section,aside,a,ins').forEach(function(e){"
                       + "var s=getComputedStyle(e);if(s.position!=='fixed')return;"
                       + "if((parseInt(s.zIndex)||0)<500)return;"
                       + "var t=e.id+' '+e.className+' '+e.innerText;"
-                      + "if(ok.test(t)||e.querySelector('input,select,textarea,video'))return;e.remove();});"
+                      + "if(ok.test(t)||e.querySelector('input,select,textarea,video,iframe'))return;e.remove();});"
                       + "document.documentElement.style.overflow='auto';document.body.style.overflow='auto';"
                       + "}catch(x){}}"
                       + "clean();setInterval(clean,1000);})()";
@@ -222,6 +234,12 @@ jobs:
               private int blocked = 0, tab = 0;
               private volatile String pageHost = null;
               private TextView scan;
+              private View customView, navBar;
+              private WebChromeClient.CustomViewCallback customCb;
+              private FrameLayout content;
+              private TextView saveBtn;
+              private final ArrayList<String> vids = new ArrayList<>();
+              private volatile boolean hls = false;
 
               private final Runnable tick = new Runnable() {
                   @Override
@@ -294,7 +312,7 @@ jobs:
               }
 
               private void updateShield() {
-                  String[] n = {"MATI", "STANDAR", "KETAT"};
+                  String[] n = {"MATI", "STANDAR", "SEIMBANG", "KETAT"};
                   shield.setText("\uD83D\uDEE1 Iklan: " + n[mode] + " \u00B7 " + blocked + " diblokir (ketuk ganti)");
               }
 
@@ -352,7 +370,7 @@ jobs:
                   header.addView(prog, new LinearLayout.LayoutParams(MP, dp(3)));
                   root.addView(header, new LinearLayout.LayoutParams(MP, WC));
 
-                  FrameLayout content = new FrameLayout(this);
+                  content = new FrameLayout(this);
                   web = new WebView(this);
                   content.addView(web, new FrameLayout.LayoutParams(MP, MP));
 
@@ -410,6 +428,11 @@ jobs:
                   lf.addView(emptyView, new FrameLayout.LayoutParams(MP, MP));
                   dlPage.addView(lf, new LinearLayout.LayoutParams(MP, 0, 1f));
                   content.addView(dlPage, new FrameLayout.LayoutParams(MP, MP));
+                  saveBtn = btn("\uD83C\uDFAC Simpan video", true);
+                  saveBtn.setElevation(dp(6));
+                  FrameLayout.LayoutParams slp = new FrameLayout.LayoutParams(WC, WC, Gravity.BOTTOM | Gravity.END);
+                  slp.setMargins(0, 0, dp(16), dp(16));
+                  content.addView(saveBtn, slp);
                   root.addView(content, new LinearLayout.LayoutParams(MP, 0, 1f));
 
                   View line = new View(this);
@@ -421,6 +444,7 @@ jobs:
                   tabDl = navTab("\u2B07  Unduhan");
                   nav.addView(tabBrowser, new LinearLayout.LayoutParams(0, WC, 1f));
                   nav.addView(tabDl, new LinearLayout.LayoutParams(0, WC, 1f));
+                  navBar = nav;
                   root.addView(nav, new LinearLayout.LayoutParams(MP, WC));
                   setContentView(root);
 
@@ -428,6 +452,8 @@ jobs:
                   s.setJavaScriptEnabled(true);
                   s.setDomStorageEnabled(true);
                   s.setSupportMultipleWindows(true);
+                  s.setMediaPlaybackRequiresUserGesture(false);
+                  s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
                   s.setUserAgentString(s.getUserAgentString().replace("; wv", ""));
                   CookieManager cm = CookieManager.getInstance();
                   cm.setAcceptCookie(true);
@@ -448,7 +474,16 @@ jobs:
                       @Override
                       public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest req) {
                           String host = req.getUrl().getHost();
-                          if (mode >= 1 && (isAd(host) || (mode == 2 && !req.isForMainFrame() && isThird(host)))) {
+                          String full = req.getUrl().toString();
+                          if (MEDIA.matcher(full).find()) addVid(full);
+                          else if (full.toLowerCase().contains(".m3u8")) hls = true;
+                          boolean block = false;
+                          if (mode >= 1 && isAd(host)) {
+                              block = true;
+                          } else if (mode >= 2 && !req.isForMainFrame() && isThird(host)) {
+                              block = !(mode == 2 && VID.matcher(req.getUrl().toString()).find());
+                          }
+                          if (block) {
                               count();
                               return new WebResourceResponse("text/plain", "utf-8", new ByteArrayInputStream(new byte[0]));
                           }
@@ -457,12 +492,16 @@ jobs:
 
                       @Override
                       public void onPageFinished(WebView view, String url) {
-                          if (mode == 2) view.evaluateJavascript(CLEAN, null);
+                          if (mode >= 2) view.evaluateJavascript(CLEAN, null);
                       }
 
                       @Override
                       public void onPageStarted(WebView view, String url, Bitmap icon) {
                           bar.setText(url != null && url.startsWith("http") ? url : "");
+                          synchronized (vids) {
+                              vids.clear();
+                          }
+                          hls = false;
                           try {
                               pageHost = Uri.parse(url).getHost();
                           } catch (Exception e) {
@@ -476,6 +515,16 @@ jobs:
                       public void onProgressChanged(WebView view, int p) {
                           prog.setProgress(p);
                           prog.setVisibility(p >= 100 ? View.INVISIBLE : View.VISIBLE);
+                      }
+
+                      @Override
+                      public void onShowCustomView(View view, CustomViewCallback cb) {
+                          showCustom(view, cb);
+                      }
+
+                      @Override
+                      public void onHideCustomView() {
+                          hideCustom();
                       }
 
                       @Override
@@ -514,7 +563,11 @@ jobs:
                           r.setTitle(name);
                           r.allowScanningByMediaScanner();
                           r.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-                          r.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name);
+                          if (mime != null && mime.startsWith("video/")) {
+                              r.setDestinationInExternalPublicDir(Environment.DIRECTORY_MOVIES, "Vidget/" + name);
+                          } else {
+                              r.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name);
+                          }
                           ((DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE)).enqueue(r);
                           Toast.makeText(this, "Mengunduh: " + name + "\nLihat di tab Unduhan", Toast.LENGTH_LONG).show();
                       } catch (Exception e) {
@@ -536,11 +589,12 @@ jobs:
                       }
                   });
                   shield.setOnClickListener(v -> {
-                      mode = (mode + 2) % 3;
+                      mode = (mode + 3) % 4;
                       updateShield();
                       web.reload();
                   });
                   scan.setOnClickListener(v -> scanDownloads());
+                  saveBtn.setOnClickListener(v -> findVideos());
                   tabBrowser.setOnClickListener(v -> showTab(0));
                   tabDl.setOnClickListener(v -> showTab(1));
                   folder.setOnClickListener(v -> {
@@ -554,6 +608,100 @@ jobs:
                   showTab(0);
                   web.loadDataWithBaseURL(null, HOME, "text/html", "utf-8", null);
                   handle(getIntent());
+              }
+
+              private void addVid(String u) {
+                  synchronized (vids) {
+                      vids.remove(u);
+                      vids.add(0, u);
+                      while (vids.size() > 8) vids.remove(vids.size() - 1);
+                  }
+              }
+
+              private void findVideos() {
+                  web.evaluateJavascript(VSCAN, value -> {
+                      final ArrayList<String> c = new ArrayList<>();
+                      try {
+                          JSONArray a = new JSONArray((String) new JSONTokener(value).nextValue());
+                          for (int i = 0; i < a.length(); i++) c.add(a.getString(i));
+                      } catch (Exception e) {
+                          // abaikan, pakai hasil jaringan saja
+                      }
+                      synchronized (vids) {
+                          for (String x : vids) {
+                              if (!c.contains(x)) c.add(x);
+                          }
+                      }
+                      c.removeIf(x -> !x.startsWith("http"));
+                      if (c.isEmpty()) {
+                          Toast.makeText(this, hls
+                                  ? "Video ini memakai streaming (m3u8) dan belum bisa disimpan langsung."
+                                  : "Video belum terdeteksi. Putar videonya beberapa detik, lalu tekan lagi.", Toast.LENGTH_LONG).show();
+                          return;
+                      }
+                      if (c.size() == 1) {
+                          saveVideo(c.get(0));
+                          return;
+                      }
+                      String[] labels = new String[c.size()];
+                      for (int i = 0; i < labels.length; i++) {
+                          String ho = Uri.parse(c.get(i)).getHost();
+                          labels[i] = URLUtil.guessFileName(c.get(i), null, null) + "\n" + (ho == null ? "" : ho);
+                      }
+                      new AlertDialog.Builder(this)
+                              .setTitle("Pilih video yang disimpan")
+                              .setItems(labels, (dlg, w) -> saveVideo(c.get(w)))
+                              .show();
+                  });
+              }
+
+              private void saveVideo(String url) {
+                  try {
+                      String name = URLUtil.guessFileName(url, null, null);
+                      if (name.endsWith(".bin")) name = name.substring(0, name.length() - 4) + ".mp4";
+                      DownloadManager.Request r = new DownloadManager.Request(Uri.parse(url));
+                      String ck = CookieManager.getInstance().getCookie(url);
+                      if (ck != null) r.addRequestHeader("Cookie", ck);
+                      r.addRequestHeader("User-Agent", web.getSettings().getUserAgentString());
+                      if (web.getUrl() != null) r.addRequestHeader("Referer", web.getUrl());
+                      r.setMimeType(name.endsWith(".webm") ? "video/webm" : "video/mp4");
+                      r.setTitle(name);
+                      r.allowScanningByMediaScanner();
+                      r.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+                      r.setDestinationInExternalPublicDir(Environment.DIRECTORY_MOVIES, "Vidget/" + name);
+                      ((DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE)).enqueue(r);
+                      Toast.makeText(this, "Menyimpan ke Galeri (album Vidget): " + name, Toast.LENGTH_LONG).show();
+                  } catch (Exception e) {
+                      Toast.makeText(this, "Gagal: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                  }
+              }
+
+              private void showCustom(View v, WebChromeClient.CustomViewCallback cb) {
+                  if (customView != null) {
+                      cb.onCustomViewHidden();
+                      return;
+                  }
+                  customView = v;
+                  customCb = cb;
+                  v.setBackgroundColor(Color.BLACK);
+                  content.addView(v, new FrameLayout.LayoutParams(MP, MP));
+                  header.setVisibility(View.GONE);
+                  navBar.setVisibility(View.GONE);
+                  setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+                  getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN
+                          | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+              }
+
+              private void hideCustom() {
+                  if (customView == null) return;
+                  content.removeView(customView);
+                  customView = null;
+                  if (customCb != null) customCb.onCustomViewHidden();
+                  customCb = null;
+                  header.setVisibility(tab == 0 ? View.VISIBLE : View.GONE);
+                  navBar.setVisibility(View.VISIBLE);
+                  setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+                  getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
               }
 
               private void scanDownloads() {
@@ -598,6 +746,7 @@ jobs:
                   dlPage.setVisibility(t == 1 ? View.VISIBLE : View.GONE);
                   tabBrowser.setTextColor(t == 0 ? ACC : MUT);
                   tabDl.setTextColor(t == 1 ? ACC : MUT);
+                  if (saveBtn != null) saveBtn.setVisibility(t == 0 ? View.VISIBLE : View.GONE);
                   h.removeCallbacks(tick);
                   if (t == 1) {
                       refresh();
@@ -757,7 +906,8 @@ jobs:
 
               @Override
               public void onBackPressed() {
-                  if (tab == 1) showTab(0);
+                  if (customView != null) hideCustom();
+                  else if (tab == 1) showTab(0);
                   else if (web.canGoBack()) web.goBack();
                   else super.onBackPressed();
               }
